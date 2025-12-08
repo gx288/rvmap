@@ -33,7 +33,7 @@ jobs:
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
         run: |
           echo "=== BẮT ĐẦU CHẠY REVIEWMAP CHECKER ==="
-          python login_reviewmap.py
+          python -u login_reviewmap.py
 
           echo "=== ĐÃ CHẠY XONG – BÂY GIỜ PUSH FILE LÊN REPO ==="
           git config user.name "github-actions[bot]"
