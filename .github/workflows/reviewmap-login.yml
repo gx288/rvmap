@@ -1,0 +1,32 @@
+name: ReviewMap Login Check
+on:
+  schedule:
+    - cron: '0 */6 * * *'   # Chạy mỗi 6 tiếng
+  workflow_dispatch:
+
+jobs:
+  login:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.11'
+      - name: Install dependencies
+        run: |
+          pip install selenium requests
+          wget https://chromedriver.storage.googleapis.com/129.0.6668.89/chromedriver_linux64.zip
+          unzip chromedriver_linux64.zip
+          wget https://chrome.google.com/webstore/download/129.0.6668.89
+          # Cách tốt hơn: dùng selenium-wire hoặc action có sẵn chrome
+      - name: Use better chrome setup
+        uses: browser-actions/setup-chrome@latest
+      - run: chrome --version
+      - name: Run login script
+        env:
+          REVIEWMAP_USERNAME: ${{ secrets.REVIEWMAP_USERNAME }}
+          REVIEWMAP_PASSWORD: ${{ secrets.REVIEWMAP_PASSWORD }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python login_reviewmap.py
