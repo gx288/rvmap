@@ -1,7 +1,6 @@
 import os
 import time
 import json
-import requests
 from datetime import datetime
 from selenium import webdriver
 from selenium.webdriver.chrome.service import Service
@@ -9,7 +8,6 @@ from selenium.webdriver.chrome.options import Options
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.common.exceptions import TimeoutException
 from webdriver_manager.chrome import ChromeDriverManager
 from pyvirtualdisplay import Display
 
@@ -30,18 +28,13 @@ MAX_RETRIES = 3
 
 
 def send_telegram(message):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return False
+    if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
+        return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
-        requests.post(url, data={
-            "chat_id": TELEGRAM_CHAT_ID,
-            "text": message,
-            "parse_mode": "HTML"
-        }, timeout=10)
-        return True
+        requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
     except:
-        return False
+        pass
 
 
 def create_driver():
@@ -75,18 +68,16 @@ def login(driver):
         return False
 
 
-def check_new_task_popup(driver):
-    """Kiểm tra có popup chứa từ 'time:' không (dấu hiệu có nhiệm vụ mới)"""
+def has_new_task_popup(driver):
+    """Kiểm tra có popup chứa từ 'time:' không"""
     try:
-        # Đợi 5s để popup hiện (nếu có)
-        time.sleep(5)
-        page_source = driver.page_source.lower()
-        if "time:" in page_source and ("modal" in page_source or "popup" in page_source or "toast" in page_source):
-            # Thêm kiểm tra chính xác hơn: tìm thẻ có chứa "time:" trong nội dung
-            elements = driver.find_elements(By.XPATH, "//*[contains(translate(text(), 'TIME:', 'time:'), 'time:')]")
-            if elements:
-                send_telegram("Có nhiệm vụ Review Maps mới.\nNhanh tay nhận kẻo hết!")
-                print("PHÁT HIỆN NHIỆM VỤ MỚI!")
+        time.sleep(5)  # Đợi popup hiện
+        # Cách 1: tìm trong page source
+        source = driver.page_source.lower()
+        if "time:" in source:
+            # Cách 2: tìm element có chứa "time:"
+            elems = driver.find_elements(By.XPATH, "//*[contains(translate(text(),'TIME:','time:'),'time:')]")
+            if elems:
                 return True
         return False
     except:
@@ -104,59 +95,72 @@ def get_last_login_info(driver):
             cells = row.find_elements(By.TAG_NAME, "td")
             if len(cells) >= 5 and "Đăng nhập thành công qua WEB" in cells[2].text:
                 return {
-                    "id": cells[0].text.strip(),
                     "username": cells[1].text.strip(),
+                    "last_login_time": cells[4].text.strip(),
+                    "last_ip": cells[3].text.strip(),
                     "action": cells[2].text.strip(),
-                    "ip": cells[3].text.strip(),
-                    "time": cells[4].text.strip(),
-                    "checked_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                    "log_id": cells[0].text.strip()
                 }
         return None
     except Exception as e:
-        print(f"Error getting login info: {e}")
+        print(f"Get info error: {e}")
         return None
 
 
-def save_report(data):
-    if not data:
-        return
-    txt_content = f"""REVIEWMAP - BÁO CÁO ĐĂNG NHẬP
+def save_report(has_task, login_info):
+    now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+
+    report_data = {
+        "checked_at": now,
+        "has_new_task": has_task,
+        "task_status": "Có nhiệm vụ mới" if has_task else "Không có nhiệm vụ",
+        "account_info": login_info or {}
+    }
+
+    # TXT – dễ đọc
+    txt = f"""REVIEWMAP - BÁO CÁO KIỂM TRA
 {'='*50}
-Thời gian kiểm tra: {data['checked_at']}
-Tài khoản: {data['username']}
-Lần đăng nhập cuối: {data['time']}
-IP gần nhất: {data['ip']}
-Hành động: {data['action']}
-ID log: {data['id']}
+Thời gian kiểm tra: {now}
+Trạng thái nhiệm vụ: {report_data['task_status']}
+{'-'*50}
+Tài khoản: {login_info.get('username', 'N/A')}
+Lần đăng nhập cuối: {login_info.get('last_login_time', 'N/A')}
+IP gần nhất: {login_info.get('last_ip', 'N/A')}
+Hành động: {login_info.get('action', 'N/A')}
+ID log: {login_info.get('log_id', 'N/A')}
 """
     with open("report.txt", "w", encoding="utf-8") as f:
-        f.write(txt_content)
+        f.write(txt)
 
+    # JSON
     with open("report.json", "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
+        json.dump(report_data, f, ensure_ascii=False, indent=2)
+
+    print(f"Đã lưu báo cáo – Có nhiệm vụ: {has_task}")
 
 
 def commit_and_push():
     if not GH_TOKEN or not GITHUB_REPOSITORY:
+        print("Không có GH_TOKEN → bỏ qua push")
         return
     os.system("git config --global user.name 'ReviewMap Bot'")
     os.system("git config --global user.email 'bot@example.com'")
     os.system(f"git remote set-url origin https://x-access-token:{GH_TOKEN}@github.com/{GITHUB_REPOSITORY}.git")
     os.system("git add report.txt report.json")
-    os.system('git commit -m "Update: Báo cáo đăng nhập $(date)" || echo "No changes"')
-    os.system("git push origin HEAD:main --quiet || echo 'Push failed'")
+    os.system(f'git commit -m "Update: Kiểm tra lúc {datetime.now():%Y-%m-%d %H:%M}" || echo "No changes"')
+    os.system("git push origin HEAD:main --quiet")
 
 
 def main():
     if not USERNAME or not PASSWORD:
-        send_telegram("Thiếu USERNAME hoặc PASSWORD trong Secrets!")
+        send_telegram("Thiếu USERNAME hoặc PASSWORD!")
         return
 
     display = Display(visible=0, size=(1920, 1080))
     display.start()
 
     driver = None
-    login_success = False
+    login_ok = False
 
     for attempt in range(1, MAX_RETRIES + 1):
         try:
@@ -164,30 +168,22 @@ def main():
             print(f"Thử đăng nhập lần {attempt}...")
 
             if login(driver):
-                login_success = True
-                print("Đăng nhập thành công!")
+                login_ok = True
 
-                # Bước 1: Kiểm tra popup nhiệm vụ mới
+                # 1. Vào trang chủ kiểm tra popup nhiệm vụ
                 driver.get(HOME_URL)
-                has_new_task = check_new_task_popup(driver)
+                has_task = has_new_task_popup(driver)
 
-                # Bước 2: Lấy thông tin đăng nhập cuối + lưu file
-                last_login = get_last_login_info(driver)
-                if last_login:
-                    msg = (f"<b>Đăng nhập ReviewMap thành công!</b>\n"
-                           f"Tài khoản: <code>{last_login['username']}</code>\n"
-                           f"Đăng nhập cuối: <b>{last_login['time']}</b>\n"
-                           f"IP: <code>{last_login['ip']}</code>\n"
-                           f"Kiểm tra lúc: {last_login['checked_at']}")
-                    if has_new_task:
-                        msg = "\n" + msg
-                    send_telegram(msg)
+                # 2. Nếu có nhiệm vụ → báo Telegram ngay
+                if has_task:
+                    send_telegram("Có nhiệm vụ Review Maps mới!\nNhanh tay nhận kẻo hết!")
 
-                    save_report(last_login)
-                    commit_and_push()
-                else:
-                    send_telegram("Đăng nhập OK nhưng không lấy được lịch sử hoạt động")
+                # 3. Lấy thông tin đăng nhập cuối + lưu báo cáo
+                login_info = get_last_login_info(driver)
+                save_report(has_task, login_info)
+                commit_and_push()
 
+                print("Hoàn tất kiểm tra!")
                 break
 
         except Exception as e:
@@ -196,15 +192,15 @@ def main():
             if driver:
                 driver.quit()
 
-        if attempt < MAX_RETRIES:
-            time.sleep(15)
+        time.sleep(15)
 
     display.stop()
 
-    # Chỉ gửi thất bại 1 lần duy nhất sau 3 lần thử
-    if not login_success:
+    # Chỉ báo thất bại 1 lần duy nhất
+    if not login_ok:
         send_telegram("ĐĂNG NHẬP REVIEWMAP THẤT BẠI SAU 3 LẦN THỬ!\n"
-                      "Kiểm tra lại tài khoản, mật khẩu hoặc web đang chặn bot.")
+                      "Kiểm tra tài khoản/mật khẩu hoặc web đang chặn bot.")
+
 
 if __name__ == "__main__":
     main()
