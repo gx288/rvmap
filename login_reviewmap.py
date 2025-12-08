@@ -123,7 +123,8 @@ def save_report(has_task, login_info):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     status = "CÓ NHIỆM VỤ MỚI" if has_task else "KHÔNG CÓ NHIỆM VỤ"
 
-    txt_content = f"""REVIEWMAP - BÁO CÁO KIỂM TRA
+    # Nội dung báo cáo mới (luôn ở đầu)
+    new_entry = f"""REVIEWMAP - BÁO CÁO KIỂM TRA
 {'='*60}
 Thời gian kiểm tra: {now}
 TRẠNG THÁI NHIỆM VỤ: {status}
@@ -134,24 +135,42 @@ IP gần nhất     : {login_info.get('last_ip', 'N/A')}
 Hành động       : {login_info.get('action', 'N/A')}
 ID log          : {login_info.get('log_id', 'N/A')}
 {'='*60}
+
 """
 
-    txt_path = f"{REPORT_DIR}/report.txt"
-    json_path = f"{REPORT_DIR}/report.json"
+    txt_path = "reports/report.txt"
+    old_content = ""
 
+    # Đọc file cũ nếu tồn tại
+    if os.path.exists(txt_path):
+        with open(txt_path, "r", encoding="utf-8") as f:
+            old_content = f.read()
+
+    # Ghép: mới + cũ
+    full_content = new_entry + old_content
+
+    # Tách thành các dòng và giữ tối đa 5000 dòng
+    lines = full_content.strip().split('\n')
+    if len(lines) > 5000:
+        lines = lines[:5000]  # Giữ 5000 dòng đầu (mới nhất)
+        log(f"Đã tự động cắt bớt log cũ → còn lại 5000 dòng")
+
+    # Ghi lại file
     with open(txt_path, "w", encoding="utf-8") as f:
-        f.write(txt_content)
-    log(f"Đã ghi file: {txt_path}")
+        f.write('\n'.join(lines) + '\n')
 
+    log(f"Đã ghi thêm báo cáo mới lên đầu – Tổng: {len(lines)} dòng")
+
+    # Cập nhật file JSON (vẫn ghi đè vì chỉ cần bản mới nhất)
+    json_path = "reports/report.json"
     report_json = {
-        "checked_at": now,
+        "last_check": now,
         "has_new_task": has_task,
         "task_status": status,
         "account": login_info or {}
     }
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(report_json, f, ensure_ascii=False, indent=2)
-    log(f"Đã ghi file: {json_path}")
 
 def commit_and_push():
     if not GH_TOKEN:
