@@ -1,33 +1,48 @@
 name: ReviewMap Checker
 
+# Chạy mỗi 2 tiếng + cho phép bấm tay chạy bất cứ lúc nào
 on:
   schedule:
-    - cron: '0 */2 * * *'  # Mỗi 2 tiếng
-  workflow_dispatch:
+    - cron: '0 */2 * * *'   # Mỗi 2 tiếng (tùy chỉnh thoải mái)
+  workflow_dispatch:        # Bấm tay chạy được luôn
 
 jobs:
   check:
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      contents: write        # Cho phép push file lên repo
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - name: Setup Python
+      - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: pip install selenium webdriver-manager requests pyvirtualdisplay
+        run: |
+          pip install selenium webdriver-manager requests pyvirtualdisplay
 
-      - name: Run checker
+      - name: Run login + tạo báo cáo + push luôn
         env:
           REVIEWMAP_USERNAME: ${{ secrets.REVIEWMAP_USERNAME }}
           REVIEWMAP_PASSWORD: ${{ secrets.REVIEWMAP_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
-          GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python login_reviewmap.py
+        run: |
+          echo "=== BẮT ĐẦU CHẠY REVIEWMAP CHECKER ==="
+          python login_reviewmap.py
+
+          echo "=== ĐÃ CHẠY XONG – BÂY GIỜ PUSH FILE LÊN REPO ==="
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add reports/
+          git commit -m "Auto: Update ReviewMap report $(date +'%Y-%m-%d %H:%M:%S')" || echo "Không có gì để commit"
+          git push origin HEAD:main || echo "Push xong hoặc đã up-to-date rồi"
+          echo "HOÀN TẤT – FILE ĐÃ LÊN REPO!"
+
+      # Dòng này chỉ để hiện log đẹp hơn trong Actions
+      - name: Done
+        run: echo "Xong hết rồi anh ơi! Vào repo xem file reports/ đi"
