@@ -1,13 +1,17 @@
-name: ReviewMap Auto Login
+# .github/workflows/reviewmap.yml
+name: ReviewMap Login & Report
 
 on:
   schedule:
-    - cron: '0 */4 * * *'   # Chạy mỗi 4 tiếng (tùy chỉnh thoải mái)
+    - cron: '0 */4 * * *'  # Mỗi 4 tiếng
   workflow_dispatch:
 
 jobs:
-  login:
+  run:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Cho phép push file lên repo
+
     steps:
       - uses: actions/checkout@v4
 
@@ -20,11 +24,13 @@ jobs:
         run: |
           pip install selenium webdriver-manager requests pyvirtualdisplay
 
-      - name: Run login script
+      - name: Run login & save report
         env:
           REVIEWMAP_USERNAME: ${{ secrets.REVIEWMAP_USERNAME }}
           REVIEWMAP_PASSWORD: ${{ secrets.REVIEWMAP_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}  # Token có quyền push repo
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           python login_reviewmap.py
