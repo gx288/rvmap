@@ -1,36 +1,33 @@
-# .github/workflows/reviewmap.yml
-name: ReviewMap Login & Report
+name: ReviewMap Checker
 
 on:
   schedule:
-    - cron: '0 */4 * * *'  # Mỗi 4 tiếng
+    - cron: '0 */2 * * *'  # Mỗi 2 tiếng
   workflow_dispatch:
 
 jobs:
-  run:
+  check:
     runs-on: ubuntu-latest
     permissions:
-      contents: write  # Cho phép push file lên repo
+      contents: write
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.11'
 
       - name: Install dependencies
-        run: |
-          pip install selenium webdriver-manager requests pyvirtualdisplay
+        run: pip install selenium webdriver-manager requests pyvirtualdisplay
 
-      - name: Run login & save report
+      - name: Run checker
         env:
           REVIEWMAP_USERNAME: ${{ secrets.REVIEWMAP_USERNAME }}
           REVIEWMAP_PASSWORD: ${{ secrets.REVIEWMAP_PASSWORD }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}  # Token có quyền push repo
+          GH_TOKEN: ${{ secrets.GH_TOKEN }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: |
-          python login_reviewmap.py
+        run: python login_reviewmap.py
