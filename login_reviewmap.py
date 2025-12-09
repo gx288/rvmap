@@ -1,3 +1,4 @@
+# login_reviewmap.py
 import os
 import time
 import json
@@ -17,19 +18,16 @@ USERNAME = os.getenv('REVIEWMAP_USERNAME')
 PASSWORD = os.getenv('REVIEWMAP_PASSWORD')
 TELEGRAM_BOT_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-GH_TOKEN = os.getenv('GH_TOKEN')
-GITHUB_REPOSITORY = os.getenv('GITHUB_REPOSITORY', '')
 
 LOGIN_URL = "https://reviewmap.vn/login"
 HOME_URL = "https://reviewmap.vn/"
 PROFILE_URL = "https://reviewmap.vn/account/profile"
 MAX_RETRIES = 3
-REPORT_DIR = "reports"  # Tạo thư mục riêng cho đẹp
+REPORT_DIR = "reports"
 # ===============================================
 
 if not os.path.exists(REPORT_DIR):
     os.makedirs(REPORT_DIR)
-    print(f"Tạo thư mục: {REPORT_DIR}")
 
 def log(message):
     timestamp = datetime.now().strftime("%H:%M:%S")
@@ -37,14 +35,13 @@ def log(message):
 
 def send_telegram(message):
     if not (TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID):
-        log("Thiếu config Telegram → bỏ qua gửi")
         return
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
     try:
         requests.post(url, data={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "HTML"}, timeout=10)
-        log("Đã gửi Telegram")
+        log("Telegram: Đã gửi thông báo")
     except Exception as e:
-        log(f"Gửi Telegram thất bại: {e}")
+        log(f"Telegram lỗi: {e}")
 
 def create_driver():
     log("Khởi tạo ChromeDriver...")
@@ -80,20 +77,35 @@ def login(driver):
         log(f"URL hiện tại: {current}")
         return current.startswith(HOME_URL)
     except Exception as e:
-        log(f"Lỗi khi đăng nhập: {e}")
+        log(f"Lỗi đăng nhập: {e}")
         return False
 
 def has_new_task_popup(driver):
-    log("Kiểm tra popup nhiệm vụ mới (có chứa 'time:')...")
-    time.sleep(6)
-    source = driver.page_source.lower()
-    if "time:" in source:
-        elems = driver.find_elements(By.XPATH, "//*[contains(translate(text(), 'ABCDEFGHIJKLMNOPQRSTUVWXYZ:', 'abcdefghijklmnopqrstuvwxyz:'), 'time:')]")
-        if elems:
-            log("PHÁT HIỆN NHIỆM VỤ MỚI!")
+    log("Kiểm tra popup NHẬN NHIỆM VỤ...")
+    try:
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.TAG_NAME, "body")))
+        time.sleep(3)
+
+        # Cách 1: Tìm "Time XXp"
+        if driver.find_elements(By.XPATH, "//h4[contains(translate(., 'TIME', 'time'), 'time') and contains(., 'p')]"):
+            log("PHÁT HIỆN NHIỆM VỤ MỚI! (Time XXp)")
             return True
-    log("Không có nhiệm vụ mới")
-    return False
+
+        # Cách 2: Tìm nút "Đồng Ý" có onclick="getJob"
+        if driver.find_elements(By.XPATH, "//button[@onclick='getJob(this)' or contains(@onclick, 'getJob')]"):
+            log("PHÁT HIỆN NHIỆM VỤ MỚI! (Nút Đồng Ý)")
+            return True
+
+        # Cách 3: Tìm tiêu đề "NHẬN NHIỆM VỤ"
+        if driver.find_elements(By.XPATH, "//h3[contains(., 'NHẬN NHIỆM VỤ')]"):
+            log("PHÁT HIỆN NHIỆM VỤ MỚI! (Tiêu đề popup)")
+            return True
+
+        log("Không có nhiệm vụ mới")
+        return False
+    except Exception as e:
+        log(f"Lỗi kiểm tra popup: {e}")
+        return False
 
 def get_last_login_info(driver):
     log(f"Truy cập trang cá nhân: {PROFILE_URL}")
@@ -111,19 +123,18 @@ def get_last_login_info(driver):
                     "action": cells[2].text.strip(),
                     "log_id": cells[0].text.strip()
                 }
-                log(f"Tìm thấy log đăng nhập: {info['last_login_time']} từ IP {info['last_ip']}")
+                log(f"Tìm thấy log: {info['last_login_time']} - IP {info['last_ip']}")
                 return info
-        log("Không tìm thấy dòng 'Đăng nhập thành công'")
+        log("Không thấy dòng đăng nhập thành công")
         return None
     except Exception as e:
-        log(f"Lỗi lấy thông tin cá nhân: {e}")
+        log(f"Lỗi lấy thông tin: {e}")
         return None
 
 def save_report(has_task, login_info):
     now = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
     status = "CÓ NHIỆM VỤ MỚI" if has_task else "KHÔNG CÓ NHIỆM VỤ"
 
-    # Nội dung báo cáo mới (luôn ở đầu)
     new_entry = f"""REVIEWMAP - BÁO CÁO KIỂM TRA
 {'='*60}
 Thời gian kiểm tra: {now}
@@ -138,71 +149,40 @@ ID log          : {login_info.get('log_id', 'N/A')}
 
 """
 
-    txt_path = "reports/report.txt"
+    txt_path = f"{REPORT_DIR}/report.txt"
     old_content = ""
-
-    # Đọc file cũ nếu tồn tại
     if os.path.exists(txt_path):
         with open(txt_path, "r", encoding="utf-8") as f:
             old_content = f.read()
 
-    # Ghép: mới + cũ
     full_content = new_entry + old_content
-
-    # Tách thành các dòng và giữ tối đa 5000 dòng
     lines = full_content.strip().split('\n')
     if len(lines) > 5000:
-        lines = lines[:5000]  # Giữ 5000 dòng đầu (mới nhất)
-        log(f"Đã tự động cắt bớt log cũ → còn lại 5000 dòng")
+        lines = lines[:5000]
+        log(f"Đã cắt bớt log cũ → còn 5000 dòng")
 
-    # Ghi lại file
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write('\n'.join(lines) + '\n')
+    log(f"Đã thêm báo cáo mới lên đầu – Tổng: {len(lines)} dòng")
 
-    log(f"Đã ghi thêm báo cáo mới lên đầu – Tổng: {len(lines)} dòng")
-
-    # Cập nhật file JSON (vẫn ghi đè vì chỉ cần bản mới nhất)
-    json_path = "reports/report.json"
-    report_json = {
-        "last_check": now,
-        "has_new_task": has_task,
-        "task_status": status,
-        "account": login_info or {}
-    }
-    with open(json_path, "w", encoding="utf-8") as f:
-        json.dump(report_json, f, ensure_ascii=False, indent=2)
-
-def commit_and_push():
-    if not GH_TOKEN:
-        log("Không có GH_TOKEN → bỏ qua push")
-        return False
-
-    log("Bắt đầu commit & push lên GitHub...")
-    try:
-        os.system("git config --global user.name 'ReviewMap Bot'")
-        os.system("git config --global user.email 'bot@noreply.github.com'")
-        os.system(f"git remote set-url origin https://x-access-token:{GH_TOKEN}@github.com/{GITHUB_REPOSITORY}.git")
-
-        os.system("git add reports/")
-        os.system(f'git commit -m "Auto update: Kiểm tra ReviewMap {datetime.now():%Y-%m-%d %H:%M:%S}"')
-        os.system("git push origin HEAD:main --force")
-        log("PUSH THÀNH CÔNG! File đã lên repo")
-        return True
-    except Exception as e:
-        log(f"Push thất bại: {e}")
-        return False
+    # JSON: chỉ lưu bản mới nhất
+    with open(f"{REPORT_DIR}/report.json", "w", encoding="utf-8") as f:
+        json.dump({
+            "last_check": now,
+            "has_new_task": has_task,
+            "task_status": status,
+            "account": login_info or {}
+        }, f, ensure_ascii=False, indent=2)
 
 def main():
-    log("BẮT ĐẦU CHẠY REVIEWMAP CHECKER")
+    log("BẮT ĐẦU REVIEWMAP CHECKER")
 
     if not USERNAME or not PASSWORD:
-        log("Thiếu USERNAME hoặc PASSWORD!")
-        send_telegram("LỖI: Thiếu username/password trong Secrets!")
+        log("Thiếu username/password!")
         return
 
     display = Display(visible=0, size=(1920, 1080))
     display.start()
-    log("Màn hình ảo đã bật")
 
     driver = None
     success = False
@@ -218,30 +198,27 @@ def main():
                 has_task = has_new_task_popup(driver)
 
                 if has_task:
-                    send_telegram("CÓ NHIỆM VỤ REVIEW MAPS MỚI!\nNhanh tay vào nhận ngay!")
+                    send_telegram("CÓ NHIỆM VỤ REVIEW MAPS MỚI!\n"
+                                  "Time 60p - Phần thưởng 6,000đ\n"
+                                  "Nhanh tay nhấn Đồng Ý kẻo hết!")
 
                 login_info = get_last_login_info(driver)
                 save_report(has_task, login_info)
-                commit_and_push()
-                log("HOÀN TẤT LẦN NÀY!")
+                log("HOÀN TẤT – FILE ĐÃ ĐƯỢC CẬP NHẬT!")
                 break
-            else:
-                log("Đăng nhập thất bại")
 
         except Exception as e:
-            log(f"Lỗi nghiêm trọng lần {attempt}: {e}")
+            log(f"Lỗi nghiêm trọng: {e}")
         finally:
             if driver:
                 driver.quit()
 
-        if attempt < MAX_RETRIES:
-            log("Chờ 20 giây trước khi thử lại...")
-            time.sleep(20)
+        time.sleep(20)
 
     display.stop()
 
     if not success:
-        send_telegram("ĐĂNG NHẬP THẤT BẠI HOÀN TOÀN SAU 3 LẦN!\nKiểm tra tài khoản hoặc web đang chặn bot.")
+        send_telegram("ĐĂNG NHẬP THẤT BẠI SAU 3 LẦN!\nKiểm tra tài khoản hoặc web đang chặn")
 
     log("KẾT THÚC CHƯƠNG TRÌNH")
 
