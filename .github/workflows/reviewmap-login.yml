@@ -2,8 +2,6 @@ name: ReviewMap Checker
 
 # Chạy mỗi 2 tiếng + cho phép bấm tay chạy bất cứ lúc nào
 on:
-  schedule:
-    - cron: '*/30 * * * *'   # Mỗi 2 tiếng (tùy chỉnh thoải mái)
   workflow_dispatch:        # Bấm tay chạy được luôn
 
 jobs:
